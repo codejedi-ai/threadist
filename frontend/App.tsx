@@ -13,6 +13,8 @@ import InterestSelectionScreen from './src/screens/InterestSelectionScreen';
 import SubredditSelectionScreen from './src/screens/SubredditSelectionScreen';
 import HomeScreen from './src/screens/HomeScreen';
 import CategoryScreen from './src/screens/CategoryScreen';
+import StoryDetailsScreen from './src/screens/StoryDetailsScreen';
+import ExploreScreen from './src/screens/ExploreScreen';
 import theme from './src/styles/theme';
 import { AuthUser, authService } from './src/services/authService';
 import { interestsService } from './src/services/interestsService';
@@ -21,9 +23,12 @@ export default function App() {
   const [showSplash, setShowSplash] = useState(true);
   const [currentScreen, setCurrentScreen] = useState('Welcome');
   const [screenProps, setScreenProps] = useState<any>({});
+  const [navigationHistory, setNavigationHistory] = useState<string[]>(['Welcome']);
   const [user, setUser] = useState<AuthUser | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isManualNavigation, setIsManualNavigation] = useState(false);
+  const [allowAuthNavigation, setAllowAuthNavigation] = useState(false);
 
   const checkUserOnboardingStatus = async (user: AuthUser) => {
     // Check if email is confirmed first
@@ -43,33 +48,50 @@ export default function App() {
     }
 
     if (hasCompleted) {
+      console.log('✅ User onboarding complete, setting Home screen and proper navigation history');
       setCurrentScreen('Home');
+      // Ensure proper navigation history when user reaches Home
+      setNavigationHistory(['Welcome', 'Home']);
     } else {
       setCurrentScreen('Interests');
     }
   };
 
   useEffect(() => {
-    // Auto sign out on app reload/restart (useful for development)
-    const autoSignOut = async () => {
-      await authService.signOut();
-      setIsLoading(false);
-    };
-    
-    autoSignOut();
+    // Comment out auto sign out for development - this was causing issues with navigation
+    // const autoSignOut = async () => {
+    //   await authService.signOut();
+    //   setIsLoading(false);
+    // };
+    // autoSignOut();
+
+    setIsLoading(false);
 
     // Listen to auth changes
     const { data: { subscription } } = authService.onAuthStateChanged((user, session) => {
+      console.log('🔐 Auth state changed - User:', user ? `${user.email} (${user.id})` : 'null');
+      console.log('🔐 Auth state changed - Session:', session ? 'exists' : 'null');
+      console.log('🔐 Current screen:', currentScreen);
+      console.log('🔐 Show splash:', showSplash);
+      console.log('🔐 Is manual navigation:', isManualNavigation);
+      console.log('🔐 Allow auth navigation:', allowAuthNavigation);
+      
       setUser(user);
       setSession(session);
       
-      // Navigate based on auth state after splash screen
-      if (!showSplash) {
+      // Only navigate based on auth state if conditions are met
+      if (!showSplash && !isManualNavigation && allowAuthNavigation && 
+          currentScreen !== 'Welcome' && currentScreen !== 'SignUp' && currentScreen !== 'Login') {
         if (user) {
+          console.log('🔐 User exists, checking onboarding status...');
           checkUserOnboardingStatus(user);
         } else {
+          console.log('🔐 No user, navigating to Welcome');
           setCurrentScreen('Welcome');
+          setNavigationHistory(['Welcome']);
         }
+      } else {
+        console.log('🔐 Skipping auth navigation - conditions not met');
       }
     });
 
@@ -78,17 +100,82 @@ export default function App() {
 
   const handleSplashComplete = () => {
     setShowSplash(false);
-    // Navigate based on current auth state
-    if (user) {
+    // For new users or when no user is authenticated, always show Welcome screen first
+    // Only auto-navigate to onboarding if user is already authenticated from a previous session
+    if (user && session) {
+      console.log('🎬 Splash complete, existing user session found, checking onboarding...');
       checkUserOnboardingStatus(user);
     } else {
+      console.log('🎬 Splash complete, no existing session, showing Welcome');
       setCurrentScreen('Welcome');
+      setNavigationHistory(['Welcome']);
     }
+    
+    // Enable auth navigation after a delay to prevent immediate redirects for new sign-ups
+    setTimeout(() => {
+      setAllowAuthNavigation(true);
+      console.log('🎬 Auth navigation enabled');
+    }, 2000);
   };
 
   const navigate = (screenName: string, props?: any) => {
+    console.log('🚀 Navigate called:', screenName, 'with props:', props);
+    console.log('🚀 Current history before navigation:', navigationHistory);
+    setIsManualNavigation(true);
+    setNavigationHistory(prev => {
+      const newHistory = [...prev, screenName];
+      console.log('🚀 New history after navigation:', newHistory);
+      return newHistory;
+    });
     setCurrentScreen(screenName);
     setScreenProps(props || {});
+    
+    // Reset manual navigation flag after a delay
+    setTimeout(() => {
+      setIsManualNavigation(false);
+    }, 1000);
+  };
+
+  const goBack = () => {
+    console.log('🔙 GoBack called');
+    console.log('🔙 Current history:', navigationHistory);
+    console.log('🔙 Current screen:', currentScreen);
+    console.log('🔙 Current user:', user ? user.email : 'null');
+    
+    setIsManualNavigation(true);
+    
+    setNavigationHistory(prev => {
+      const newHistory = [...prev];
+      newHistory.pop(); // Remove current screen
+      let previousScreen = newHistory[newHistory.length - 1] || 'Home';
+      
+      // Safety check: if user is authenticated and we're going back to Welcome, go to Home instead
+      if (user && previousScreen === 'Welcome') {
+        previousScreen = 'Home';
+        // Update history to reflect this
+        const correctedHistory = ['Welcome', 'Home'];
+        console.log('🔙 Corrected navigation: User is authenticated, redirecting to Home instead of Welcome');
+        console.log('🔙 Previous screen (corrected):', previousScreen);
+        console.log('🔙 New history (corrected):', correctedHistory);
+        
+        setCurrentScreen(previousScreen);
+        setScreenProps({});
+        return correctedHistory;
+      }
+      
+      console.log('🔙 Previous screen:', previousScreen);
+      console.log('🔙 New history:', newHistory);
+      
+      setCurrentScreen(previousScreen);
+      // Clear props when going back - the previous screen should handle its own state
+      setScreenProps({});
+      return newHistory.length > 0 ? newHistory : ['Home'];
+    });
+    
+    // Reset manual navigation flag after a delay
+    setTimeout(() => {
+      setIsManualNavigation(false);
+    }, 1000);
   };
 
   // Show splash screen
@@ -118,7 +205,11 @@ export default function App() {
       case 'Home':
         return <HomeScreen navigation={{ navigate }} user={user} />;
       case 'CategoryScreen':
-        return <CategoryScreen navigation={{ navigate, goBack: () => navigate('Home') }} route={{ params: screenProps }} user={user} />;
+        return <CategoryScreen navigation={{ navigate, goBack }} route={{ params: screenProps }} user={user} />;
+      case 'StoryDetails':
+        return <StoryDetailsScreen navigation={{ navigate, goBack }} route={{ params: screenProps }} user={user} />;
+      case 'Explore':
+        return <ExploreScreen navigation={{ navigate, goBack }} user={user} />;
       case 'Welcome':
       default:
         return <WelcomeScreen navigation={{ navigate }} />;
